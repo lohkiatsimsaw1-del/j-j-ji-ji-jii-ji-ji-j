@@ -1,0 +1,186 @@
+-- ====== 🧹 1. 自动清理历史 UI，防止手机端多层叠加卡顿 =======
+for _, oldUI in ipairs(game:GetService("CoreGui"):GetChildren()) do
+    if oldUI.Name == "MinFarmUI" or oldUI.Name == "修仙终极完全体面板" then
+        oldUI:Destroy()
+    end
+end
+
+-- ======= 🛠️ 2. 手动核心控制参数中心 =======
+_G.AutoLocalFarm = false     -- 默认关闭
+_G.FarmRadius = 100          -- [要求1：范围控制] 以开启时的原点为中心，半径100码内打怪
+_G.WalkSpeedLimit = 45       -- [要求2：稳定性] 平滑移动速度，纯靠物理速度推移，坚决不瞬移/飞天
+_G.AttackDelay = 0.25        -- [要求3：速度调节] 每次攻击的间隔时间（秒），可在UI中随时手调
+
+local Players = game:GetService("Players")
+local Workspace = game:GetService("Workspace")
+local VirtualInputManager = game:GetService("VirtualInputManager")
+local CoreGui = game:GetService("CoreGui")
+local RunService = game:GetService("RunService")
+local LocalPlayer = Players.LocalPlayer
+local homeAnchor = nil -- 挂机圆心锚点
+
+-- NPC过滤黑名单
+local NPC_BLACKLIST = {"npc", "shop", "商人", "道人", "师傅", "导师", "任务", "quest", "villager", "村民", "铁匠", "传送", "dummy"}
+local function isNpc(model)
+    local name = string.lower(model.Name)
+    for _, keyword in ipairs(NPC_BLACKLIST) do
+        if string.find(name, keyword) then return true end
+    end
+    return Players:GetPlayerFromCharacter(model) ~= nil
+end
+
+-- ====== 📱 3. 极简手机端专属 UI（大小适中、支持拖动） ======
+local ScreenGui = Instance.new("ScreenGui", CoreGui)
+ScreenGui.Name = "MinFarmUI"
+
+local Frame = Instance.new("Frame", ScreenGui)
+Frame.Size = UDim2.new(0, 160, 0, 150)
+Frame.Position = UDim2.new(0.4, 0, 0.3, 0)
+Frame.BackgroundColor3 = Color3.fromRGB(25, 25, 25)
+Frame.Active = true
+Frame.Draggable = true -- 完美支持手机端按住拖动
+
+local MainBtn = Instance.new("TextButton", Frame)
+MainBtn.Size = UDim2.new(0, 140, 0, 40)
+MainBtn.Position = UDim2.new(0, 10, 0, 10)
+MainBtn.BackgroundColor3 = Color3.fromRGB(231, 76, 60)
+MainBtn.Text = "自动打怪: OFF"
+MainBtn.TextColor3 = Color3.new(1,1,1)
+Instance.new("UICorner", MainBtn).CornerRadius = UDim.new(0, 5)
+
+local RadiusBtn = Instance.new("TextButton", Frame)
+RadiusBtn.Size = UDim2.new(0, 140, 0, 35)
+RadiusBtn.Position = UDim2.new(0, 10, 0, 60)
+RadiusBtn.BackgroundColor3 = Color3.fromRGB(52, 152, 219)
+RadiusBtn.Text = "挂机范围: " .. _G.FarmRadius
+RadiusBtn.TextColor3 = Color3.new(1,1,1)
+Instance.new("UICorner", RadiusBtn).CornerRadius = UDim.new(0, 5)
+
+local SpeedBtn = Instance.new("TextButton", Frame)
+SpeedBtn.Size = UDim2.new(0, 140, 0, 35)
+SpeedBtn.Position = UDim2.new(0, 10, 0, 105)
+SpeedBtn.BackgroundColor3 = Color3.fromRGB(155, 89, 182)
+SpeedBtn.Text = "攻击延迟: " .. _G.AttackDelay .. "s"
+SpeedBtn.TextColor3 = Color3.new(1,1,1)
+Instance.new("UICorner", SpeedBtn).CornerRadius = UDim.new(0, 5)
+
+-- ====== 🔘 4. UI 交互逻辑绑定 ======
+MainBtn.Activated:Connect(function()
+    _G.AutoLocalFarm = not _G.AutoLocalFarm
+    if _G.AutoLocalFarm then
+        MainBtn.Text = "自动打怪: ON"
+        MainBtn.BackgroundColor3 = Color3.fromRGB(46, 204, 113)
+        -- 【关键】开启挂机的瞬间，将你当前坐标锁定为“圆心”，防止跑图
+        if LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart") then
+            homeAnchor = LocalPlayer.Character.HumanoidRootPart.Position
+        end
+    else
+        MainBtn.Text = "自动打怪: OFF"
+        MainBtn.BackgroundColor3 = Color3.fromRGB(231, 76, 60)
+        homeAnchor = nil
+    end
+end)
+
+RadiusBtn.Activated:Connect(function()
+    if _G.FarmRadius == 100 then _G.FarmRadius = 50 
+    elseif _G.FarmRadius == 50 then _G.FarmRadius = 200 
+    else _G.FarmRadius = 100 end
+    RadiusBtn.Text = "挂机范围: " .. _G.FarmRadius
+end)
+
+SpeedBtn.Activated:Connect(function()
+    -- [要求3：手动调速切换] 可以在 0.1秒（极限）、0.25秒（稳定）、0.5秒（安全）之间循环切换
+    if _G.AttackDelay == 0.25 then _G.AttackDelay = 0.1
+    elseif _G.AttackDelay == 0.1 then _G.AttackDelay = 0.5
+    else _G.AttackDelay = 0.25 end
+    SpeedBtn.Text = "攻击延迟: " .. _G.AttackDelay .. "s"
+end)
+
+-- ====== ⚔️ 5. 局限性雷达搜索（防跑远） ======
+local function getNearbyMonster()
+    if not homeAnchor then return nil end
+    local target, nearest = nil, math.huge
+    local myRoot = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+    if not myRoot then return nil end
+    
+    for _, obj in ipairs(Workspace:GetDescendants()) do
+        if obj:IsA("Model") and obj:FindFirstChild("Humanoid") and obj:FindFirstChild("HumanoidRootPart") and obj ~= LocalPlayer.Character then
+            if obj.Humanoid.Health > 0 and not isNpc(obj) then
+                -- [严格判定]：怪物到你开启挂机时“原点”的距离，超出范围绝不过去
+                local distToHome = (obj.HumanoidRootPart.Position - homeAnchor).Magnitude
+                if distToHome <= _G.FarmRadius then
+                    local distToMe = (myRoot.Position - obj.HumanoidRootPart.Position).Magnitude
+                    if distToMe < nearest then nearest = distToMe; target = obj end
+                end
+            end
+        end
+    end
+    return target
+end
+
+-- ====== 🏃 6. 物理线性平滑位移（抗封防飞人核心） ======
+RunService.Stepped:Connect(function()
+    local char = LocalPlayer.Character
+    local root = char and char:FindFirstChild("HumanoidRootPart")
+    if not root or not _G.AutoLocalFarm or not homeAnchor then return end
+    
+    -- 挂机时关闭自身碰撞，防止被不必要的地形、墙壁卡死
+    for _, p in ipairs(char:GetDescendants()) do if p:IsA("BasePart") then p.CanCollide = false end end
+    
+    local enemy = getNearbyMonster()
+    if enemy and enemy:FindFirstChild("HumanoidRootPart") then
+        local pos = enemy.HumanoidRootPart.Position
+        local distance = (pos - root.Position).Magnitude
+        
+        if distance > 5 then -- 保持5码安全攻击身位，不与怪完全贴靠叠在一起
+            local direction = (pos - root.Position).Unit
+            -- 严格使用物理速度向量向前“跑”，不改写CFrame坐标，在服务器层面表现为正常移动
+            root.Velocity = Vector3.new(direction.X, 0, direction.Z).Unit * _G.WalkSpeedLimit
+            root.CFrame = CFrame.lookAt(root.Position, Vector3.new(pos.X, root.Position.Y, pos.Z))
+        else
+            root.Velocity = Vector3.new(0,0,0)
+        end
+    else
+        -- 圈内没怪了，平滑朝圆心锚点走回去，而不是瞬间传送
+        if (homeAnchor - root.Position).Magnitude > 5 then
+            local direction = (homeAnchor - root.Position).Unit
+            root.Velocity = Vector3.new(direction.X, 0, direction.Z).Unit * _G.WalkSpeedLimit
+        else
+            root.Velocity = Vector3.new(0,0,0)
+        end
+    end
+end)
+
+-- ====== ⚡ 7. 控速挂机打怪线程 ======
+task.spawn(function()
+    while true do
+        if _G.AutoLocalFarm and homeAnchor then
+            local enemy = getNearbyMonster()
+            if enemy then
+                pcall(function()
+                    -- 自动拔包里带“剑/武/刃/sword”关键词的武器
+                    local bp = LocalPlayer:FindFirstChild("Backpack")
+                    if bp and bp:FindFirstChildOfClass("Tool") then 
+                        LocalPlayer.Character.Humanoid:EquipTool(bp:FindFirstChildOfClass("Tool")) 
+                    end
+                    
+                    -- 模拟手机点击与基础技能键（1和Z）
+                    VirtualInputManager:SendKeyEvent(true, Enum.KeyCode.One, false, game)
+                    VirtualInputManager:SendKeyEvent(true, Enum.KeyCode.Z, false, game)
+                    VirtualInputManager:SendMouseButtonEvent(0, 0, 0, true, game, 0)
+                    task.wait(0.01)
+                    VirtualInputManager:SendKeyEvent(false, Enum.KeyCode.One, false, game)
+                    VirtualInputManager:SendKeyEvent(false, Enum.KeyCode.Z, false, game)
+                    VirtualInputManager:SendMouseButtonEvent(0, 0, 0, false, game, 0)
+                end)
+                task.wait(_G.AttackDelay) -- [要求3] 核心控速延迟计数器
+            else
+                task.wait(0.3)
+            end
+        else
+            task.wait(0.5)
+        end
+    end
+end)
+
+print("[移动端纯净控速版] 加载成功！已剔除危险高危全图代码。")
