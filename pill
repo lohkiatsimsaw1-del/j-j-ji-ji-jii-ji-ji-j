@@ -1,0 +1,186 @@
+-- =================================================================
+-- 🧼 1. 历史 UI 清理，防止多层叠加卡死
+-- =================================================================
+for _, oldUI in ipairs(game:GetService("CoreGui"):GetChildren()) do
+    if oldUI.Name == "AutoAlchemyUI" then oldUI:Destroy() end
+end
+
+-- =================================================================
+-- ⚙️ 2. 全局炼丹控制参数
+-- =================================================================
+_G.AutoCraftActive = false
+_G.SelectedPill = "Awakening Qi Pill"
+_G.SelectedYear = "1 years"  -- 默认1年，可选：10years, 100years, 1000years 等
+
+local Players = game:GetService("Players")
+local CoreGui = game:GetService("CoreGui")
+local VirtualInputManager = game:GetService("VirtualInputManager")
+local LocalPlayer = Players.LocalPlayer
+
+-- 从你提供的截图里精准提取的全部丹药配方字典
+local PILL_RECIPES = {
+    ["Awakening Qi Pill"]   = {"Ginseng", "Ginseng", "Spirit Grass", "Spirit Grass"},
+    ["Perfect Qi Pill"]     = {"Ginseng", "Spirit Grass", "Spirit Grass", "Lotus"},
+    ["Moonlight Qi Pill"]   = {"Moonlight Flower", "Moonlight Flower", "Moonlight Flower", "Moonlight Flower"},
+    ["Nine Rotations Pill"] = {"Blood Flower", "Blood Flower", "Lotus", "Blood Flower"},
+    ["Dark Pill"]           = {"Ginseng", "Ginseng", "Ginseng", "Ginseng"}, -- 备用兜底
+    ["Heavenly Pill"]       = {"Lotus", "Lotus", "Moonlight Flower", "Moonlight Flower"},
+    ["Demonic Pill"]        = {"Blood Flower", "Blood Flower", "Blood Flower", "Blood Flower"},
+    ["Dragon Pill"]         = {"Ginseng", "Spirit Grass", "Lotus", "Blood Flower"},
+    ["Divine Ascension Pill"] = {"Ginseng", "Ginseng", "Moonlight Flower", "Lotus"},
+    ["Endless Flow Pill"]   = {"Blood Flower", "Spirit Grass", "Lotus", "Moonlight Flower"}
+}
+
+-- 支持切换的年份列表
+local YEAR_LIST = {"1 years", "10years", "100years", "1000years", "10000years", "100000years"}
+local PILL_LIST = {"Awakening Qi Pill", "Perfect Qi Pill", "Moonlight Qi Pill", "Nine Rotations Pill", "Heavenly Pill", "Demonic Pill", "Dragon Pill", "Divine Ascension Pill", "Endless Flow Pill"}
+
+local currentPillIndex = 1
+local currentYearIndex = 1
+
+-- =================================================================
+-- 📱 3. 手机端适配：双色极简交互面板
+-- =================================================================
+local ScreenGui = Instance.new("ScreenGui", CoreGui)
+ScreenGui.Name = "AutoAlchemyUI"
+
+local MainFrame = Instance.new("Frame", ScreenGui)
+MainFrame.Size = UDim2.new(0, 220, 0, 190)
+MainFrame.Position = UDim2.new(0.1, 0, 0.3, 0)
+MainFrame.BackgroundColor3 = Color3.fromRGB(30, 30, 38)
+MainFrame.Active = true
+MainFrame.Draggable = true -- 支持全手机屏幕随心拖动
+Instance.new("UICorner", MainFrame).CornerRadius = UDim.new(0, 8)
+
+-- 标题
+local Title = Instance.new("TextLabel", MainFrame)
+Title.Size = UDim2.new(1, 0, 0, 30)
+Title.Text = "✥ 智能全自动炼丹炉 ✥"
+Title.TextColor3 = Color3.fromRGB(240, 240, 240)
+Title.BackgroundColor3 = Color3.fromRGB(45, 45, 55)
+Title.Font = Enum.Font.GothamBold
+Title.TextSize = 12
+
+-- 1. 丹药选择按钮
+local PillBtn = Instance.new("TextButton", MainFrame)
+PillBtn.Size = UDim2.new(1, -20, 0, 35)
+PillBtn.Position = UDim2.new(0, 10, 0, 40)
+PillBtn.BackgroundColor3 = Color3.fromRGB(52, 152, 219)
+PillBtn.Text = "目标: " .. _G.SelectedPill
+PillBtn.TextColor3 = Color3.new(1,1,1)
+PillBtn.Font = Enum.Font.Gotham
+Instance.new("UICorner", PillBtn).CornerRadius = UDim.new(0, 5)
+
+-- 2. 年份选择按钮
+local YearBtn = Instance.new("TextButton", MainFrame)
+YearBtn.Size = UDim2.new(1, -20, 0, 35)
+YearBtn.Position = UDim2.new(0, 10, 0, 85)
+YearBtn.BackgroundColor3 = Color3.fromRGB(155, 89, 182)
+YearBtn.Text = "草药年份: " .. _G.SelectedYear
+YearBtn.TextColor3 = Color3.new(1,1,1)
+YearBtn.Font = Enum.Font.Gotham
+Instance.new("UICorner", YearBtn).CornerRadius = UDim.new(0, 5)
+
+-- 3. 自动炼丹主开关
+local CraftBtn = Instance.new("TextButton", MainFrame)
+CraftBtn.Size = UDim2.new(1, -20, 0, 45)
+CraftBtn.Position = UDim2.new(0, 10, 0, 130)
+CraftBtn.BackgroundColor3 = Color3.fromRGB(231, 76, 60)
+CraftBtn.Text = "自动合成: 已关闭"
+CraftBtn.TextColor3 = Color3.new(1,1,1)
+CraftBtn.TextSize = 14
+CraftBtn.Font = Enum.Font.GothamBold
+Instance.new("UICorner", CraftBtn).CornerRadius = UDim.new(0, 6)
+
+-- =================================================================
+-- 🔘 4. UI 交互逻辑切换控制
+-- =================================================================
+PillBtn.Activated:Connect(function()
+    currentPillIndex = currentPillIndex + 1
+    if currentPillIndex > #PILL_LIST then currentPillIndex = 1 end
+    _G.SelectedPill = PILL_LIST[currentPillIndex]
+    PillBtn.Text = "目标: " .. _G.SelectedPill
+end)
+
+YearBtn.Activated:Connect(function()
+    currentYearIndex = currentYearIndex + 1
+    if currentYearIndex > #YEAR_LIST then currentYearIndex = 1 end
+    _G.SelectedYear = YEAR_LIST[currentYearIndex]
+    YearBtn.Text = "草药年份: " .. _G.SelectedYear
+end)
+
+CraftBtn.Activated:Connect(function()
+    _G.AutoCraftActive = not _G.AutoCraftActive
+    if _G.AutoCraftActive then
+        CraftBtn.Text = "自动合成: 正在炼制..."
+        CraftBtn.BackgroundColor3 = Color3.fromRGB(46, 204, 113)
+    else
+        CraftBtn.Text = "自动合成: 已关闭"
+        CraftBtn.BackgroundColor3 = Color3.fromRGB(231, 76, 60)
+    end
+end)
+
+-- =================================================================
+-- ⚡ 5. 核心全自动智能配方识别与模拟投放线程
+-- =================================================================
+task.spawn(function()
+    while true do
+        if _G.AutoCraftActive then
+            pcall(function()
+                -- 获取当前选定丹药的四个所需材料名字
+                local recipe = PILL_RECIPES[_G.SelectedPill]
+                local playerGui = LocalPlayer:FindFirstChild("PlayerGui")
+                
+                if recipe and playerGui then
+                    -- ⚔️ 第一步：寻找并打开游戏内的炼丹/制作面板（游戏内常见命名防呆）
+                    local craftFrame = playerGui:FindFirstChild("Craft", true) or playerGui:FindFirstChild("Alchemy", true)
+                    
+                    -- ⚔️ 第二步：依次投放配方要求的 4 个材料
+                    for slotIndex, herbName in ipairs(recipe) do
+                        -- 在玩家的背包/材料资源栏内，定位带有指定“年份”和“草药名”的格子
+                        -- 格式通常为：10years Ginseng 或 Ginseng (100years)
+                        local targetItem = nil
+                        for _, item in ipairs(playerGui:GetDescendants()) do
+                            if item:IsA("TextButton") or item:IsA("ImageButton") then
+                                local text = string.lower(item.Name .. (item:FindFirstChild("Text") and item.Text or ""))
+                                if string.find(text, string.lower(herbName)) and string.find(text, string.lower(_G.SelectedYear)) then
+                                    targetItem = item
+                                    break
+                                end
+                            end
+                        end
+                        
+                        -- 如果找到了对应的特定年份材料，执行 Equip / 放入操作
+                        if targetItem then
+                            -- 优先尝试调用点击
+                            targetItem:Activate()
+                            -- 针对有些非标准按钮，用底层输入系统进行双保险点击
+                            VirtualInputManager:SendMouseButtonEvent(targetItem.AbsolutePosition.X + 10, targetItem.AbsolutePosition.Y + 10, 0, true, game, 0)
+                            task.wait(0.02)
+                            VirtualInputManager:SendMouseButtonEvent(targetItem.AbsolutePosition.X + 10, targetItem.AbsolutePosition.Y + 10, 0, false, game, 0)
+                            task.wait(0.1) -- 手机端防抽搐温控延迟
+                        end
+                    end
+                    
+                    -- ⚔️ 第三步：所有素材填入完毕后，寻找底部的“Craft”或者“合成”按钮并触发
+                    local finalCraftButton = nil
+                    for _, btn in ipairs(playerGui:GetDescendants()) do
+                        if btn:IsA("TextButton") and (string.lower(btn.Text) == "craft" or btn.Text == "合成" or btn.Name == "CraftButton") then
+                            finalCraftButton = btn
+                            break
+                        end
+                    end
+                    
+                    if finalCraftButton then
+                        finalCraftButton:Activate()
+                    end
+                end
+            end)
+            task.wait(0.5) -- 每半秒完成一轮高品质炼制循环
+        else
+            task.wait(1)
+        end
+    end
+end)
+
+print("[全自动年份控速炼丹炉] 模块加载就绪，完美支持手机端！")
