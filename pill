@@ -1,169 +1,112 @@
 -- =================================================================
--- 🧼 1. 彻底清理旧残留
+-- 🧼 1. 清理历史残余 UI
 -- =================================================================
 for _, oldUI in ipairs(game:GetService("CoreGui"):GetChildren()) do
-    if oldUI.Name == "AutoAlchemyUI" or oldUI.Name == "AlchemyArrowGui" then 
-        oldUI:Destroy() 
-    end
+    if oldUI.Name == "ClickTriggerAssistantUI" then oldUI:Destroy() end
 end
 
 -- =================================================================
--- ⚙️ 2. 控制参数
+-- ⚙️ 2. 全局开关状态
 -- =================================================================
-_G.AutoCraftActive = false
-_G.SelectedPill = "Awakening Qi Pill"
-_G.SelectedYear = "1 years" 
+_G.TriggerAssistantActive = false
 
 local Players = game:GetService("Players")
 local CoreGui = game:GetService("CoreGui")
-local VirtualInputManager = game:GetService("VirtualInputManager")
 local LocalPlayer = Players.LocalPlayer
 
-local PILL_RECIPES = {
-    ["Awakening Qi Pill"]   = {"Ginseng", "Ginseng", "Spirit Grass", "Spirit Grass"},
-    ["Perfect Qi Pill"]     = {"Ginseng", "Spirit Grass", "Spirit Grass", "Lotus"},
-    ["Moonlight Qi Pill"]   = {"Moonlight Flower", "Moonlight Flower", "Moonlight Flower", "Moonlight Flower"}
-}
-
-local YEAR_LIST = {"1 years", "10years", "100years", "1000years"}
-local PILL_LIST = {"Awakening Qi Pill", "Perfect Qi Pill", "Moonlight Qi Pill"}
-
--- ====== 🏹 创建一个绝对图层（确保箭头能无条件显示） ======
-local ArrowGui = Instance.new("ScreenGui", CoreGui)
-ArrowGui.Name = "AlchemyArrowGui"
-ArrowGui.DisplayOrder = 9999 -- 强行置顶在所有UI最前面
-
-local VisualArrow = Instance.new("TextLabel", ArrowGui)
-VisualArrow.Size = UDim2.new(0, 50, 0, 50)
-VisualArrow.BackgroundTransparency = 1
-VisualArrow.Text = "⚡⬇️" 
-VisualArrow.TextSize = 40
-VisualArrow.TextColor3 = Color3.fromRGB(255, 0, 0)
-VisualArrow.Visible = false
-
--- 底层物理绝对坐标点击
-local function hardClick(element)
-    if not element then return end
-    local x = element.AbsolutePosition.X + (element.AbsoluteSize.X / 2)
-    local y = element.AbsolutePosition.Y + (element.AbsoluteSize.Y / 2)
-    
-    -- 强行展示红色箭头
-    VisualArrow.Position = UDim2.new(0, x - 25, 0, y - 55)
-    VisualArrow.Visible = true
-    
-    -- 敲击模拟
-    VirtualInputManager:SendMouseButtonEvent(x, y, 0, true, game, 0)
-    task.wait(0.05)
-    VirtualInputManager:SendMouseButtonEvent(x, y, 0, false, game, 0)
-    print("▶️ [系统已执行物理敲击] 坐标位置: " .. x .. ", " .. y)
+-- 精准点击函数
+local function autoClickUse(useButton)
+    if useButton and useButton.Visible then
+        useButton:Activate() -- 触发点击
+    end
 end
 
 -- =================================================================
--- 📱 UI 控制面板
+-- 📱 3. 创建纯净的 ON / OFF 开关界面
 -- =================================================================
 local ScreenGui = Instance.new("ScreenGui", CoreGui)
-ScreenGui.Name = "AutoAlchemyUI"
+ScreenGui.Name = "ClickTriggerAssistantUI"
 
-local MainFrame = Instance.new("Frame", ScreenGui)
-MainFrame.Size = UDim2.new(0, 220, 0, 150)
-MainFrame.Position = UDim2.new(0.2, 0, 0.2, 0)
-MainFrame.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
-MainFrame.Active = true
-MainFrame.Draggable = true
+local ToggleBtn = Instance.new("TextButton", ScreenGui)
+ToggleBtn.Size = UDim2.new(0, 130, 0, 45)
+ToggleBtn.Position = UDim2.new(0.1, 0, 0.1, 0) -- 放在屏幕左上角
+ToggleBtn.BackgroundColor3 = Color3.fromRGB(231, 76, 60) -- 默认红色 (OFF)
+ToggleBtn.Text = "触发器: OFF"
+ToggleBtn.TextColor3 = Color3.new(1, 1, 1)
+ToggleBtn.Font = Enum.Font.GothamBold
+ToggleBtn.TextSize = 16
+ToggleBtn.Active = true
+ToggleBtn.Draggable = true -- 允许你用手指在屏幕上到处拖动位置
+Instance.new("UICorner", ToggleBtn).CornerRadius = UDim.new(0, 8)
 
-local Title = Instance.new("TextLabel", MainFrame)
-Title.Size = UDim2.new(1, 0, 0, 30)
-Title.Text = "测试版 - 故障排查炼丹炉"
-Title.TextColor3 = Color3.new(1,1,1)
-Title.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
-
-local CraftBtn = Instance.new("TextButton", MainFrame)
-CraftBtn.Size = UDim2.new(1, -20, 0, 50)
-CraftBtn.Position = UDim2.new(0, 10, 0, 60)
-CraftBtn.BackgroundColor3 = Color3.fromRGB(231, 76, 60)
-CraftBtn.Text = "点我开启排查检测"
-CraftBtn.TextColor3 = Color3.new(1,1,1)
-
-CraftBtn.Activated:Connect(function()
-    _G.AutoCraftActive = not _G.AutoCraftActive
-    if _G.AutoCraftActive then
-        CraftBtn.Text = "正在疯狂扫描中..."
-        CraftBtn.BackgroundColor3 = Color3.fromRGB(46, 204, 113)
-        print("🚨 [日志] 自动炼丹开启，开始全局搜索...")
+-- 开关切换逻辑
+ToggleBtn.Activated:Connect(function()
+    _G.TriggerAssistantActive = not _G.TriggerAssistantActive
+    if _G.TriggerAssistantActive then
+        ToggleBtn.Text = "触发器: ON"
+        ToggleBtn.BackgroundColor3 = Color3.fromRGB(46, 204, 113) -- 绿色 (ON)
     else
-        CraftBtn.Text = "点我开启排查检测"
-        CraftBtn.BackgroundColor3 = Color3.fromRGB(231, 76, 60)
-        VisualArrow.Visible = false
+        ToggleBtn.Text = "触发器: OFF"
+        ToggleBtn.BackgroundColor3 = Color3.fromRGB(231, 76, 60) -- 红色 (OFF)
     end
 end)
 
 -- =================================================================
--- ⚡ 暴力全局文字穿透搜索
+-- ⚡ 4. 核心逻辑：你点图片，它秒接 USE
 -- =================================================================
-task.spawn(function()
-    while true do
-        if _G.AutoCraftActive then
-            -- 这一次我们彻底不用 pcall，如果有报错，让执行器直接把红字吐在你的屏幕上！
-            local recipe = PILL_RECIPES[_G.SelectedPill]
-            
-            -- 【破壁扫描】：不要局限于 PlayerGui，把游戏所有可能放UI的地方全部扫一遍
-            local searchPool = {}
-            for _, g in ipairs(game:GetService("CoreGui"):GetChildren()) do table.insert(searchPool, g) end
-            for _, g in ipairs(LocalPlayer:WaitForChild("PlayerGui"):GetChildren()) do table.insert(searchPool, g) end
-            
-            print("🔍 [分析] 正在扫描画面中的文字元件，当前目标草药: " .. recipe[1])
-            
-            local foundHerb = nil
-            -- 开始在整个屏幕的UI池子里捞字
-            for _, guiElement in ipairs(searchPool) do
-                for _, v in ipairs(guiElement:GetDescendants()) do
-                    if v:IsA("TextLabel") or v:IsA("TextButton") then
-                        if v.Visible and v.Text ~= "" then
-                            local txt = string.lower(v.Text)
-                            -- 检测有没有包含你想要的草药名字（比如 ginseng）
-                            if string.find(txt, string.lower(recipe[1])) then
-                                print("🎉 [找到目标文字了！] 文字内容是: " .. v.Text .. " | 所在区域: " .. guiElement.Name)
-                                foundHerb = v:IsA("TextButton") and v or v.Parent
-                                break
+local PlayerGui = LocalPlayer:WaitForChild("PlayerGui")
+
+-- 监听整个 UI 界面的所有点击动作
+PlayerGui.DescendantLettersCloned or PlayerGui.DescendantAdded:Connect(function(descendant)
+    -- 持续监听新弹出的按钮
+end)
+
+-- 每当游戏界面有任何按钮被你按下时触发
+local function setupListener()
+    for _, button in ipairs(PlayerGui:GetDescendants()) do
+        if button:IsA("TextButton") or button:IsA("ImageButton") then
+            button.MouseButton1Click:Connect(function()
+                -- 只有在开关为 ON 的时候才执行后面的逻辑
+                if _G.TriggerAssistantActive then
+                    -- 延时万分之一秒，等待游戏的 USE 弹窗现身
+                    task.defer(function()
+                        -- 在 PlayerGui 里瞬间抓取刚冒出来的 USE / 使用 / Equip 按钮
+                        for _, obj in ipairs(PlayerGui:GetDescendants()) do
+                            if obj:IsA("TextButton") and obj.Visible then
+                                local text = string.lower(obj.Text)
+                                if text == "use" or text == "使用" or text == "equip" or text == "放入" then
+                                    autoClickUse(obj)
+                                    break
+                                end
                             end
                         end
-                    end
+                    end)
                 end
-                if foundHerb then break end
-            end
-            
-            if foundHerb then
-                -- 找到了就砸箭头并点击
-                hardClick(foundHerb)
-                task.wait(0.5)
-                
-                print("🔍 [分析] 正在寻找弹出的 Use 按钮...")
-                local foundUse = nil
-                for _, guiElement in ipairs(searchPool) do
-                    for _, v in ipairs(guiElement:GetDescendants()) do
-                        if v:IsA("TextButton") and v.Visible then
-                            local t = string.lower(v.Text)
-                            if t == "use" or t == "使用" or t == "equip" then
-                                foundUse = v
-                                break
-                            end
-                        end
-                    end
-                end
-                
-                if foundUse then
-                    print("🎉 [找到Use按钮！] 准备点击...")
-                    hardClick(foundUse)
-                else
-                    print("❌ [错误] 找到了草药，但全屏幕扫完都没看到弹出的 'Use' 或 '使用' 按钮。")
-                end
-            else
-                print("❌ [错误] 全屏幕扫描完毕，没有发现任何带有文字 '" .. recipe[1] .. "' 的可见按钮！请确认炼丹/背包界面是否真的打开了。")
-            end
-            
-            task.wait(1.5) -- 拉长排查间隔，方便你看清控制台打印了什么
-        else
-            task.wait(0.5)
+            end)
         end
     end
+end
+
+-- 首次注入时绑定所有按钮，并防止界面刷新后失效
+setupListener()
+PlayerGui.DescendantAdded:Connect(function(child)
+    if child:IsA("TextButton") or child:IsA("ImageButton") then
+        child.MouseButton1Click:Connect(function()
+            if _G.TriggerAssistantActive then
+                task.defer(function()
+                    for _, obj in ipairs(PlayerGui:GetDescendants()) do
+                        if obj:IsA("TextButton") and obj.Visible then
+                            local text = string.lower(obj.Text)
+                            if text == "use" or text == "使用" or text == "equip" or text == "放入" then
+                                autoClickUse(obj)
+                                break
+                            end
+                        end
+                    end
+                end)
+            end
+        end)
+    end
 end)
+
+print("[触发式助手] 加载成功！手动点图片 -> 自动接USE。")
