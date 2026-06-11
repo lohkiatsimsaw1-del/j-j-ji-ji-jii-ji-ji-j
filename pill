@@ -1,48 +1,48 @@
 -- =================================================================
--- 🧼 1. 清理历史残余 UI
+-- 🧼 1. 清理可能残存的旧界面
 -- =================================================================
-for _, oldUI in ipairs(game:GetService("CoreGui"):GetChildren()) do
-    if oldUI.Name == "ClickTriggerAssistantUI" then oldUI:Destroy() end
-end
-
--- =================================================================
--- ⚙️ 2. 全局开关状态
--- =================================================================
-_G.TriggerAssistantActive = false
-
 local Players = game:GetService("Players")
-local CoreGui = game:GetService("CoreGui")
 local LocalPlayer = Players.LocalPlayer
+local PlayerGui = LocalPlayer:WaitForChild("PlayerGui")
+local VirtualInputManager = game:GetService("VirtualInputManager")
 
--- 精准点击函数
-local function autoClickUse(useButton)
-    if useButton and useButton.Visible then
-        useButton:Activate() -- 触发点击
-    end
+for _, oldUI in ipairs(PlayerGui:GetChildren()) do
+    if oldUI.Name == "DynamicUseAssistantUI" then oldUI:Destroy() end
 end
 
 -- =================================================================
--- 📱 3. 创建纯净的 ON / OFF 开关界面
+-- ⚙️ 2. 完美的 ON / OFF 唯一开关
 -- =================================================================
-local ScreenGui = Instance.new("ScreenGui", CoreGui)
-ScreenGui.Name = "ClickTriggerAssistantUI"
+_G.DynamicTriggerActive = false
 
-local ToggleBtn = Instance.new("TextButton", ScreenGui)
-ToggleBtn.Size = UDim2.new(0, 130, 0, 45)
-ToggleBtn.Position = UDim2.new(0.1, 0, 0.1, 0) -- 放在屏幕左上角
+-- =================================================================
+-- 📱 3. 极简 UI 控制台（注入 PlayerGui 确保稳定显现）
+-- =================================================================
+local ScreenGui = Instance.new("ScreenGui")
+ScreenGui.Name = "DynamicUseAssistantUI"
+ScreenGui.ResetOnSpawn = false -- 角色重置后 UI 不会消失
+ScreenGui.Parent = PlayerGui
+
+local ToggleBtn = Instance.new("TextButton")
+ToggleBtn.Size = UDim2.new(0, 140, 0, 50)
+ToggleBtn.Position = UDim2.new(0.05, 0, 0.15, 0) -- 屏幕左上角安全区
 ToggleBtn.BackgroundColor3 = Color3.fromRGB(231, 76, 60) -- 默认红色 (OFF)
 ToggleBtn.Text = "触发器: OFF"
 ToggleBtn.TextColor3 = Color3.new(1, 1, 1)
 ToggleBtn.Font = Enum.Font.GothamBold
 ToggleBtn.TextSize = 16
 ToggleBtn.Active = true
-ToggleBtn.Draggable = true -- 允许你用手指在屏幕上到处拖动位置
-Instance.new("UICorner", ToggleBtn).CornerRadius = UDim.new(0, 8)
+ToggleBtn.Draggable = true -- 允许你用手指在屏幕上到处拖动它
+ToggleBtn.Parent = ScreenGui
 
--- 开关切换逻辑
+local UICorner = Instance.new("UICorner")
+UICorner.CornerRadius = UDim.new(0, 8)
+UICorner.Parent = ToggleBtn
+
+-- 点击切换开关状态
 ToggleBtn.Activated:Connect(function()
-    _G.TriggerAssistantActive = not _G.TriggerAssistantActive
-    if _G.TriggerAssistantActive then
+    _G.DynamicTriggerActive = not _G.DynamicTriggerActive
+    if _G.DynamicTriggerActive then
         ToggleBtn.Text = "触发器: ON"
         ToggleBtn.BackgroundColor3 = Color3.fromRGB(46, 204, 113) -- 绿色 (ON)
     else
@@ -52,61 +52,45 @@ ToggleBtn.Activated:Connect(function()
 end)
 
 -- =================================================================
--- ⚡ 4. 核心逻辑：你点图片，它秒接 USE
+-- ⚡ 4. 核心：动态追踪左下角不固定位置的 Use 键
 -- =================================================================
-local PlayerGui = LocalPlayer:WaitForChild("PlayerGui")
-
--- 监听整个 UI 界面的所有点击动作
-PlayerGui.DescendantLettersCloned or PlayerGui.DescendantAdded:Connect(function(descendant)
-    -- 持续监听新弹出的按钮
-end)
-
--- 每当游戏界面有任何按钮被你按下时触发
-local function setupListener()
-    for _, button in ipairs(PlayerGui:GetDescendants()) do
-        if button:IsA("TextButton") or button:IsA("ImageButton") then
-            button.MouseButton1Click:Connect(function()
-                -- 只有在开关为 ON 的时候才执行后面的逻辑
-                if _G.TriggerAssistantActive then
-                    -- 延时万分之一秒，等待游戏的 USE 弹窗现身
-                    task.defer(function()
-                        -- 在 PlayerGui 里瞬间抓取刚冒出来的 USE / 使用 / Equip 按钮
-                        for _, obj in ipairs(PlayerGui:GetDescendants()) do
-                            if obj:IsA("TextButton") and obj.Visible then
-                                local text = string.lower(obj.Text)
-                                if text == "use" or text == "使用" or text == "equip" or text == "放入" then
-                                    autoClickUse(obj)
-                                    break
-                                end
-                            end
+task.spawn(function()
+    while true do
+        if _G.DynamicTriggerActive then
+            pcall(function()
+                -- 全局深度高频扫描屏幕上所有【可见】且【大小正常】的按钮
+                for _, obj in ipairs(PlayerGui:GetDescendants()) do
+                    -- 同时兼顾普通文字按钮和图片按钮（防止Use键是用图片做的）
+                    if (obj:IsA("TextButton") or obj:IsA("ImageButton")) and obj.Visible and obj.AbsoluteSize.X > 0 and obj.AbsolutePosition.Y > 0 then
+                        
+                        -- 提取按钮的文本和名字，并全部转为小写模糊匹配
+                        local buttonText = string.lower(obj:IsA("TextButton") and obj.Text or "")
+                        local buttonName = string.lower(obj.Name)
+                        
+                        -- 只要名字或者文本里包含 "use"、"使用"、"equip"、"放入"
+                        if string.find(buttonText, "use") or string.find(buttonText, "使用") or string.find(buttonText, "equip") or string.find(buttonText, "放入") or 
+                           string.find(buttonName, "use") or string.find(buttonName, "使用") then
+                            
+                            -- 🌟【关键点】：不管它此时此刻因为点哪张图片而移到了哪个不固定的位置
+                            -- 脚本直接抓取它在屏幕上的绝对 X 和 Y 坐标，计算出中心点
+                            local realX = obj.AbsolutePosition.X + (obj.AbsoluteSize.X / 2)
+                            local realY = obj.AbsolutePosition.Y + (obj.AbsoluteSize.Y / 2)
+                            
+                            -- 底层物理鼠标信号发射，直接强行按下去！
+                            VirtualInputManager:SendMouseButtonEvent(realX, realY, 0, true, game, 0)
+                            task.wait(0.01)
+                            VirtualInputManager:SendMouseButtonEvent(realX, realY, 0, false, game, 0)
+                            
+                            -- 点击成功后，安全防抖等待 0.2 秒，防止反复狂点同一个按钮造成卡顿
+                            task.wait(0.2)
+                            break
                         end
-                    end)
+                    end
                 end
             end)
         end
-    end
-end
-
--- 首次注入时绑定所有按钮，并防止界面刷新后失效
-setupListener()
-PlayerGui.DescendantAdded:Connect(function(child)
-    if child:IsA("TextButton") or child:IsA("ImageButton") then
-        child.MouseButton1Click:Connect(function()
-            if _G.TriggerAssistantActive then
-                task.defer(function()
-                    for _, obj in ipairs(PlayerGui:GetDescendants()) do
-                        if obj:IsA("TextButton") and obj.Visible then
-                            local text = string.lower(obj.Text)
-                            if text == "use" or text == "使用" or text == "equip" or text == "放入" then
-                                autoClickUse(obj)
-                                break
-                            end
-                        end
-                    end
-                end)
-            end
-        end)
+        task.wait(0.01) -- 每秒疯狂雷达扫描 100 次，只要 Use 键露头就别想跑
     end
 end)
 
-print("[触发式助手] 加载成功！手动点图片 -> 自动接USE。")
+print("[动态追踪触发器] 针对不固定位置 UI 优化完毕！")
