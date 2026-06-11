@@ -1,23 +1,24 @@
 -- =================================================================
--- 🧼 1. 历史 UI 清理，防止多层叠加卡死
+-- 🧼 1. 历史 UI 与旧箭头清理
 -- =================================================================
 for _, oldUI in ipairs(game:GetService("CoreGui"):GetChildren()) do
-    if oldUI.Name == "AutoAlchemyUI" then oldUI:Destroy() end
+    if oldUI.Name == "AutoAlchemyUI" or oldUI.Name == "AlchemyArrowGui" then 
+        oldUI:Destroy() 
+    end
 end
 
 -- =================================================================
--- ⚙️ 2. 全局炼丹控制参数
+-- ⚙️ 2. 全局控制参数与配方
 -- =================================================================
 _G.AutoCraftActive = false
 _G.SelectedPill = "Awakening Qi Pill"
-_G.SelectedYear = "1 years" -- 可在UI中自由切换 10years, 100years 等
+_G.SelectedYear = "1 years" 
 
 local Players = game:GetService("Players")
 local CoreGui = game:GetService("CoreGui")
 local VirtualInputManager = game:GetService("VirtualInputManager")
 local LocalPlayer = Players.LocalPlayer
 
--- 精准配方字典（严格对应 4 次选择）
 local PILL_RECIPES = {
     ["Awakening Qi Pill"]   = {"Ginseng", "Ginseng", "Spirit Grass", "Spirit Grass"},
     ["Perfect Qi Pill"]     = {"Ginseng", "Spirit Grass", "Spirit Grass", "Lotus"},
@@ -37,7 +38,42 @@ local currentPillIndex = 1
 local currentYearIndex = 1
 
 -- =================================================================
--- 📱 3. 手机端极简 UI 交互控制台
+-- 🏹 3. 创建实体视觉检测箭头 (用于画面追踪指引)
+-- =================================================================
+local ArrowGui = Instance.new("ScreenGui", CoreGui)
+ArrowGui.Name = "AlchemyArrowGui"
+
+local VisualArrow = Instance.new("TextLabel", ArrowGui)
+VisualArrow.Size = UDim2.new(0, 40, 0, 40)
+VisualArrow.BackgroundTransparency = 1
+VisualArrow.Text = "⬇️" -- 经典指示箭头
+VisualArrow.TextSize = 35
+VisualArrow.TextColor3 = Color3.fromRGB(255, 50, 50) -- 显眼红色
+VisualArrow.Visible = false
+VisualArrow.ZIndex = 999
+
+-- 物理坐标强力点击函数（带视觉追踪效果）
+local function trackAndClick(element)
+    if element and element.AbsolutePosition and element.AbsoluteSize then
+        local targetX = element.AbsolutePosition.X + (element.AbsoluteSize.X / 2)
+        local targetY = element.AbsolutePosition.Y + (element.AbsoluteSize.Y / 2)
+        
+        -- 将可见的物理箭头移动到目标正上方
+        VisualArrow.Position = UDim2.new(0, targetX - 20, 0, targetY - 45)
+        VisualArrow.Visible = true
+        task.wait(0.15) -- 让人眼和系统能反应过来
+        
+        -- 发射底层鼠标物理敲击
+        VirtualInputManager:SendMouseButtonEvent(targetX, targetY, 0, true, game, 0)
+        task.wait(0.05)
+        VirtualInputManager:SendMouseButtonEvent(targetX, targetY, 0, false, game, 0)
+        return true
+    end
+    return false
+end
+
+-- =================================================================
+-- 📱 4. 控制台 UI 面板
 -- =================================================================
 local ScreenGui = Instance.new("ScreenGui", CoreGui)
 ScreenGui.Name = "AutoAlchemyUI"
@@ -45,16 +81,16 @@ ScreenGui.Name = "AutoAlchemyUI"
 local MainFrame = Instance.new("Frame", ScreenGui)
 MainFrame.Size = UDim2.new(0, 220, 0, 190)
 MainFrame.Position = UDim2.new(0.1, 0, 0.3, 0)
-MainFrame.BackgroundColor3 = Color3.fromRGB(30, 30, 38)
+MainFrame.BackgroundColor3 = Color3.fromRGB(25, 25, 30)
 MainFrame.Active = true
-MainFrame.Draggable = true 
+MainFrame.Draggable = true
 Instance.new("UICorner", MainFrame).CornerRadius = UDim.new(0, 8)
 
 local Title = Instance.new("TextLabel", MainFrame)
 Title.Size = UDim2.new(1, 0, 0, 30)
-Title.Text = "✥ 智能文字检测炼丹炉 ✥"
-Title.TextColor3 = Color3.fromRGB(240, 240, 240)
-Title.BackgroundColor3 = Color3.fromRGB(45, 45, 55)
+Title.Text = "✥ 智能视觉追踪炼丹炉 ✥"
+Title.TextColor3 = Color3.fromRGB(255, 255, 255)
+Title.BackgroundColor3 = Color3.fromRGB(40, 40, 50)
 Title.Font = Enum.Font.GothamBold
 Title.TextSize = 12
 
@@ -62,7 +98,7 @@ local PillBtn = Instance.new("TextButton", MainFrame)
 PillBtn.Size = UDim2.new(1, -20, 0, 35)
 PillBtn.Position = UDim2.new(0, 10, 0, 40)
 PillBtn.BackgroundColor3 = Color3.fromRGB(52, 152, 219)
-PillBtn.Text = "目标: " .. _G.SelectedPill
+PillBtn.Text = "目标丹药: " .. _G.SelectedPill
 PillBtn.TextColor3 = Color3.new(1,1,1)
 Instance.new("UICorner", PillBtn).CornerRadius = UDim.new(0, 5)
 
@@ -70,7 +106,7 @@ local YearBtn = Instance.new("TextButton", MainFrame)
 YearBtn.Size = UDim2.new(1, -20, 0, 35)
 YearBtn.Position = UDim2.new(0, 10, 0, 85)
 YearBtn.BackgroundColor3 = Color3.fromRGB(155, 89, 182)
-YearBtn.Text = "草药年份: " .. _G.SelectedYear
+YearBtn.Text = "设定年份: " .. _G.SelectedYear
 YearBtn.TextColor3 = Color3.new(1,1,1)
 Instance.new("UICorner", YearBtn).CornerRadius = UDim.new(0, 5)
 
@@ -78,137 +114,132 @@ local CraftBtn = Instance.new("TextButton", MainFrame)
 CraftBtn.Size = UDim2.new(1, -20, 0, 45)
 CraftBtn.Position = UDim2.new(0, 10, 0, 130)
 CraftBtn.BackgroundColor3 = Color3.fromRGB(231, 76, 60)
-CraftBtn.Text = "自动合成: 已关闭"
+CraftBtn.Text = "开启智能自动检测"
 CraftBtn.TextColor3 = Color3.new(1,1,1)
 CraftBtn.Font = Enum.Font.GothamBold
 Instance.new("UICorner", CraftBtn).CornerRadius = UDim.new(0, 6)
 
 PillBtn.Activated:Connect(function()
-    currentPillIndex = currentPillIndex + 1
-    if currentPillIndex > #PILL_LIST then currentPillIndex = 1 end
+    currentPillIndex = currentPillIndex % #PILL_LIST + 1
     _G.SelectedPill = PILL_LIST[currentPillIndex]
-    PillBtn.Text = "目标: " .. _G.SelectedPill
+    PillBtn.Text = "目标丹药: " .. _G.SelectedPill
 end)
 
 YearBtn.Activated:Connect(function()
-    currentYearIndex = currentYearIndex + 1
-    if currentYearIndex > #YEAR_LIST then currentYearIndex = 1 end
+    currentYearIndex = currentYearIndex % #YEAR_LIST + 1
     _G.SelectedYear = YEAR_LIST[currentYearIndex]
-    YearBtn.Text = "草药年份: " .. _G.SelectedYear
+    YearBtn.Text = "设定年份: " .. _G.SelectedYear
 end)
 
 CraftBtn.Activated:Connect(function()
     _G.AutoCraftActive = not _G.AutoCraftActive
     if _G.AutoCraftActive then
-        CraftBtn.Text = "自动合成: 正在检测..."
+        CraftBtn.Text = "正在智能炼制中..."
         CraftBtn.BackgroundColor3 = Color3.fromRGB(46, 204, 113)
     else
-        CraftBtn.Text = "自动合成: 已关闭"
+        CraftBtn.Text = "开启智能自动检测"
         CraftBtn.BackgroundColor3 = Color3.fromRGB(231, 76, 60)
+        VisualArrow.Visible = false
     end
 end)
 
 -- =================================================================
--- 🎯 4. 高精度画面文字自动检测与点击核心
+-- ⚡ 5. 无限循环逻辑核心：真·实体箭头探测追踪流
 -- =================================================================
--- 模拟点击游戏画面指定 UI 元素的中心点坐标，保证在手机端绝对有效
-local function clickElement(element)
-    if element and element.AbsolutePosition and element.AbsoluteSize then
-        local clickX = element.AbsolutePosition.X + (element.AbsoluteSize.X / 2)
-        local clickY = element.AbsolutePosition.Y + (element.AbsoluteSize.Y / 2)
-        
-        VirtualInputManager:SendMouseButtonEvent(clickX, clickY, 0, true, game, 0)
-        task.wait(0.05)
-        VirtualInputManager:SendMouseButtonEvent(clickX, clickY, 0, false, game, 0)
-        return true
-    end
-    return false
-end
-
 task.spawn(function()
     while true do
         if _G.AutoCraftActive then
-            pcall(function()
+            local success, err = pcall(function()
                 local recipe = PILL_RECIPES[_G.SelectedPill]
                 local playerGui = LocalPlayer:FindFirstChild("PlayerGui")
                 
                 if recipe and playerGui then
-                    local loopSuccess = true
+                    local currentStepSuccess = true
                     
-                    -- 【步骤 1 & 2 & 3】：按配方顺序，依次循环完成 4 次选择
+                    -- 【循环选药流程】：依次找到4个匹配文字材料并点USE
                     for i = 1, 4 do
                         if not _G.AutoCraftActive then break end
                         
-                        local targetHerbName = recipe[i]
-                        local foundResource = nil
+                        local targetHerb = recipe[i]
+                        local targetElement = nil
                         
-                        -- 全局文字扫描：检测匹配当前[草药名称]与[指定年份]的资源按钮
-                        for _, obj in ipairs(playerGui:GetDescendants()) do
-                            if (obj:IsA("TextLabel") or obj:IsA("TextButton")) and obj.Visible then
-                                local fullText = string.lower(obj.Text .. " " .. obj.Name)
-                                if string.find(fullText, string.lower(targetHerbName)) and string.find(fullText, string.lower(_G.SelectedYear)) then
-                                    -- 如果文字在 TextLabel 里，则将其父级（一般是Button）或自身作为点击目标
-                                    foundResource = obj:IsA("TextButton") and obj or obj.Parent
+                        -- 1. 全局深度模糊检测包含【名称】和【年份】的文字资源框
+                        for _, v in ipairs(playerGui:GetDescendants()) do
+                            if (v:IsA("TextLabel") or v:IsA("TextButton")) and v.Visible then
+                                -- 拼接名字和文本，防止游戏把信息藏在不同属性里
+                                local matchPool = string.lower(v.Text .. " " .. v.Name .. " " .. (v.Parent and v.Parent.Name or ""))
+                                if string.find(matchPool, string.lower(targetHerb)) and string.find(matchPool, string.lower(_G.SelectedYear)) then
+                                    -- 确保拿到的是可供点击的框架主体
+                                    targetElement = v:IsA("TextButton") and v or v.Parent
                                     break
                                 end
                             end
                         end
                         
-                        -- 流程核心点：如果检测到相符的文字 Resource
-                        if foundResource then
-                            -- 1. 点击检测到的相关 Resource
-                            clickElement(foundResource)
-                            task.wait(0.2) -- 等待游戏弹出 Use / 使用 菜单
+                        -- 2. 箭头指引第一步：点击资源
+                        if targetElement then
+                            print("🎯 箭头锁定第 " .. i .. " 个材料: " .. targetHerb)
+                            trackAndClick(targetElement)
+                            task.wait(0.3) -- 稳定给服务器和UI弹窗渲染时间
                             
-                            -- 2. 在画面中扫描新出现的 "Use" / "使用" / "Equip" 确认文字
+                            -- 3. 箭头指引第二步：寻找弹出的 [Use] 或者 [使用] 确认键
                             local useButton = nil
-                            for _, obj in ipairs(playerGui:GetDescendants()) do
-                                if (obj:IsA("TextButton") or obj:IsA("TextLabel")) and obj.Visible then
-                                    local t = string.lower(obj.Text)
-                                    if t == "use" or t == "使用" or t == "equip" or t == "放入" then
-                                        useButton = obj:IsA("TextButton") and obj or obj.Parent
+                            for _, v in ipairs(playerGui:GetDescendants()) do
+                                if (v:IsA("TextButton") or v:IsA("TextLabel")) and v.Visible then
+                                    local txt = string.lower(v.Text)
+                                    if txt == "use" or txt == "使用" or txt == "equip" or txt == "放入" then
+                                        useButton = v:IsA("TextButton") and v or v.Parent
                                         break
                                     end
                                 end
                             end
                             
-                            -- 点击 use
+                            -- 4. 点击 Use 放入栏位
                             if useButton then
-                                clickElement(useButton)
-                                task.wait(0.25) -- 等待放入完成，防止动作过快产生物理粘连
+                                trackAndClick(useButton)
+                                task.wait(0.25)
                             else
-                                loopSuccess = false -- 没点到 use 则判定本轮有瑕疵
+                                warn("❌ 找到了材料，但画面上没弹出 Use 选项按钮！")
+                                currentStepSuccess = false
                             end
                         else
-                            loopSuccess = false -- 画面上没找到对应年份和名称的草药文字
+                            warn("❌ 画面上未找到匹配年份: " .. _G.SelectedYear .. " 的 " .. targetHerb .. "！")
+                            currentStepSuccess = false
+                            task.wait(0.5) -- 防止找不到材料时死循环过度消耗手机 CPU
                         end
                     end
                     
-                    -- 【步骤 4】：成功完成四个选择，检测并按下 Craft 按钮
-                    if loopSuccess then
+                    -- 【第四步】：放满正确的材料后，箭头移到 Craft 上一锤定音
+                    if currentStepSuccess and _G.AutoCraftActive then
                         local craftButton = nil
-                        for _, obj in ipairs(playerGui:GetDescendants()) do
-                            if (obj:IsA("TextButton") or obj:IsA("TextLabel")) and obj.Visible then
-                                local t = string.lower(obj.Text .. " " .. obj.Name)
-                                if string.find(t, "craft") or string.find(t, "合成") or string.find(t, "refine") then
-                                    craftButton = obj:IsA("TextButton") and obj or obj.Parent
+                        for _, v in ipairs(playerGui:GetDescendants()) do
+                            if (v:IsA("TextButton") or v:IsA("TextLabel")) and v.Visible then
+                                local nameTxt = string.lower(v.Text .. " " .. v.Name)
+                                if string.find(nameTxt, "craft") or string.find(nameTxt, "合成") or string.find(nameTxt, "refine") then
+                                    craftButton = v:IsA("TextButton") and v or v.Parent
                                     break
                                 end
                             end
                         end
                         
                         if craftButton then
-                            clickElement(craftButton)
-                            task.wait(0.6) -- 等待合成药丸特效播放完毕，随后自动【重新进入大循环】
+                            print("🚀 四个材料已放满，箭头锁定合成按钮，开始制作！")
+                            trackAndClick(craftButton)
+                            task.wait(0.8) -- 等待药丸产出特效，随后进入下一次无限循环
                         end
                     end
                 end
             end)
+            
+            if not success and err then
+                print("运行时提示: ", err)
+            end
             task.wait(0.1)
         else
+            VisualArrow.Visible = false
             task.wait(0.5)
         end
     end
 end)
 
-print("[画面文字检测·智能合成箭流] 加载成功，进入无限自动循环模式！")
+print("[完全体·高亮实体箭头智能炼丹炉] 升级完毕！")
